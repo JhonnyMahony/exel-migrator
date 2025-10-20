@@ -2,12 +2,13 @@ use serde::Serialize;
 use serde_wasm_bindgen::to_value;
 use web_sys::{FormData, HtmlFormElement};
 use yew::{
-    function_component, html, use_context, use_node_ref, Callback, Html, Properties, UseStateHandle,
+    function_component, html, use_context, use_effect_with, use_node_ref, Callback, Html,
+    Properties, UseStateHandle,
 };
 use yew_hooks::use_async;
 
 use crate::app::{
-    notification::{AlertMessage, AlertType, Context},
+    notification::{AlertManager, AlertMessage, AlertType},
     tauri_invoke, Config,
 };
 
@@ -23,10 +24,11 @@ struct Args {
 
 #[function_component]
 pub fn Settings(props: &Props) -> Html {
-    let context: Context = use_context::<Context>().expect("No AppContext found!");
+    let context: AlertManager = use_context::<AlertManager>().expect("No AppContext found!");
     let settings_form = use_node_ref();
     let update_settings = {
         let settings_form = settings_form.clone();
+        let context = context.clone();
         let config = props.config.clone();
         use_async(async move {
             let form = settings_form.cast::<HtmlFormElement>().unwrap();
@@ -60,10 +62,24 @@ pub fn Settings(props: &Props) -> Html {
         })
     };
 
-    let on_submit = Callback::from(move |e: yew::SubmitEvent| {
-        e.prevent_default();
-        update_settings.run()
-    });
+    let on_submit = {
+        let update_settings = update_settings.clone();
+        Callback::from(move |e: yew::SubmitEvent| {
+            e.prevent_default();
+            update_settings.run()
+        })
+    };
+
+    {
+        let context = context.clone();
+        use_effect_with(update_settings.loading, move |l1| {
+            if *l1 {
+                context.is_loading.set(true);
+            } else {
+                context.is_loading.set(false);
+            }
+        })
+    }
 
     html! {
         <form ref={settings_form} onsubmit={on_submit} class="db-section">

@@ -14,7 +14,7 @@ use crate::{
     utils::{
         config::{load_or_create_config, update_config_field, Config},
         metabase::{add_db, create_first_user, sync_database},
-        mysql::{add_exel_table, delete_table},
+        mysql::{add_exel_table, append_table, delete_table, rewrite_table},
     },
 };
 
@@ -52,6 +52,24 @@ struct ActionData {
     range: String,
     table_name: String,
 }
+impl ActionData {
+    pub fn validate(&self) -> AppResult<()> {
+        (!self.file_path.is_empty())
+            .then_some(())
+            .ok_or(AppError::Exel("Оберть файл"))?;
+        (!self.sheet.is_empty())
+            .then_some(())
+            .ok_or(AppError::Exel("Оберть аркуш"))?;
+        (!self.range.is_empty())
+            .then_some(())
+            .ok_or(AppError::Exel("Оберть діапазон"))?;
+        (!self.table_name.is_empty())
+            .then_some(())
+            .ok_or(AppError::Exel("Оберть таблицю"))?;
+        Ok(())
+    }
+}
+
 #[derive(Deserialize)]
 enum Action {
     Create,
@@ -62,6 +80,7 @@ enum Action {
 
 #[tauri::command]
 async fn execute_action(action_data: ActionData, app_handle: AppHandle) -> AppResult<()> {
+    action_data.validate()?;
     let pool = app_handle
         .try_state::<Arc<Mutex<Pool>>>()
         .ok_or(AppError::DbConnErr)?
@@ -69,19 +88,10 @@ async fn execute_action(action_data: ActionData, app_handle: AppHandle) -> AppRe
         .clone();
 
     match action_data.action {
-        Action::Create => {
-            add_exel_table(
-                &action_data.file_path,
-                &action_data.sheet,
-                &action_data.range,
-                &action_data.table_name,
-                pool,
-            )
-            .await?;
-        }
-        Action::Rewrite => {}
-        Action::Append => {}
         Action::Delete => delete_table(&action_data.table_name, pool).await?,
+        Action::Create => add_exel_table(action_data, pool).await?,
+        Action::Append => append_table(action_data, pool).await?,
+        Action::Rewrite => rewrite_table(pool, action_data).await?,
     }
 
     let config = load_or_create_config().await?;
@@ -90,18 +100,18 @@ async fn execute_action(action_data: ActionData, app_handle: AppHandle) -> AppRe
 }
 
 #[tauri::command]
-async fn connect_to_db(server_ip: String, app_handle: AppHandle) -> AppResult<Vec<String>> {
+async fn connect_to_db(app_handle: AppHandle) -> AppResult<Vec<String>> {
     let config = load_or_create_config().await?;
     let db_url = format!(
         "mysql://{}:{}@{}/{}",
-        config.db_username, config.db_password, server_ip, config.db_name
+        config.db_username, config.db_password, config.ip_address, config.db_name
     );
     let pool = Pool::new(db_url.as_str()).map_err(|_| AppError::DbConnErr)?;
     let mut conn = pool.get_conn().map_err(|_| AppError::DbConnErr)?;
     let tables: Vec<String> = conn.query("SHOW TABLES").unwrap();
     if !config.is_initialized {
-        create_first_user(&server_ip).await?;
-        add_db(&server_ip).await?;
+        create_first_user(&config.ip_address).await?;
+        add_db(&config.ip_address).await?;
         update_config_field(
             "is_initialized",
             toml_edit::Value::Boolean(Formatted::new(true)),
@@ -110,7 +120,7 @@ async fn connect_to_db(server_ip: String, app_handle: AppHandle) -> AppResult<Ve
     }
     update_config_field(
         "ip_address",
-        toml_edit::Value::String(Formatted::new(server_ip)),
+        toml_edit::Value::String(Formatted::new(config.ip_address)),
     )
     .await?;
     app_handle.manage(Arc::new(Mutex::new(pool)));

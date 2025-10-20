@@ -1,7 +1,7 @@
 version: '3.8'
 services:
   mysql:
-    image: mysql:latest
+    image:  mysql:8.3.0
     environment:
       MYSQL_ROOT_PASSWORD: password
       MYSQL_DATABASE: mydb
@@ -13,7 +13,7 @@ services:
       - my-network
 
   metabase:
-    image: metabase/metabase:latest
+    image: metabase/metabase:v0.48.8
     ports:
       - "3000:3000"
     depends_on:
@@ -25,5 +25,3 @@ networks:
   my-network:
     driver: bridge
 
-volumes:
-  mysql-data:

@@ -6,7 +6,7 @@ use web_sys::{FormData, HtmlFormElement};
 use yew::prelude::*;
 use yew_hooks::use_async;
 
-use crate::app::notification::{AlertMessage, AlertType, Context};
+use crate::app::notification::{AlertManager, AlertMessage, AlertType};
 use crate::app::{tauri_invoke, Action, FileData};
 
 #[derive(Serialize)]
@@ -33,7 +33,7 @@ pub struct Props {
 
 #[function_component]
 pub fn Migrator(props: &Props) -> Html {
-    let context: Context = use_context::<Context>().expect("No AppContext found!");
+    let context: AlertManager = use_context::<AlertManager>().expect("No AppContext found!");
     let form_ref = use_node_ref();
 
     let action_ref = use_node_ref();
@@ -109,9 +109,26 @@ pub fn Migrator(props: &Props) -> Html {
             Ok::<(), ()>(())
         }
     });
-    let on_choose_file = Callback::from(move |_| {
-        select_file.run();
+    let on_choose_file = Callback::from({
+        let select_file = select_file.clone();
+        move |_| {
+            select_file.run();
+        }
     });
+
+    {
+        let context = context.clone();
+        use_effect_with(
+            (execute_action.loading, select_file.loading),
+            move |(l1, l2)| {
+                if *l1 || *l2 {
+                    context.is_loading.set(true);
+                } else {
+                    context.is_loading.set(false);
+                }
+            },
+        )
+    }
 
     html! {
             <form class="db-section"  ref={form_ref} onsubmit={on_submit_form}>
